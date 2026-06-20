@@ -1,0 +1,1 @@
+# Chat Comments plugin package.

@@ -17,8 +17,7 @@
 SKILLS_SUBMODULE := .skills
 
 # ── Plugin packaging ─────────────────────────────────────────────────────────
-# Replace `my_plugin` with your actual plugin name after cloning.
-PLUGIN_NAME    := my_plugin
+PLUGIN_NAME    := chat_comments
 PLUGIN_SRC     := $(PLUGIN_NAME)
 PLUGIN_VERSION := $(shell awk '/^version:/ {gsub(/[\"'"'"' ]/,"",$$2); print $$2}' $(PLUGIN_SRC)/plugin.yaml 2>/dev/null || echo '0.0.0')
 DIST           := dist

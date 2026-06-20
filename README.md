@@ -1,114 +1,54 @@
-# agent-zero-new-plugin-template
+# agent-zero-plugin-chat-comments
 
-GitHub template for new agent-zero plugin source repos in the
-[`agent-zero-plugins`](https://github.com/agent-zero-plugins) org.
+Source repo for the **Chat Comments** Agent Zero plugin.
 
-A repo cloned from this template ships **skills-ready** from the first
-commit: the shared skills library, the plugin-development testkit, the
-manifest contract, and IDE integrations are all wired up. You replace
-the `my_plugin/` placeholder with your plugin's source, author your
-tests, package the zip, and PR it into
-[`agent-zero-vendor-plugins`](https://github.com/agent-zero-plugins/agent-zero-vendor-plugins).
+Select text inside a chat message, right-click, and attach a comment to it —
+Google-Docs style. Comments are highlighted inline, persist on the chat, and can
+be edited or deleted from a popover. A button in the chat top bar opens a comments
+manager and sends all comments to the prompt box as a single numbered instruction.
 
-## Quick start
+## Features
 
-```bash
-# 1. Create a new repo from this template
-gh repo create agent-zero-plugins/agent-zero-plugin-<your-name> \
-  --template agent-zero-plugins/agent-zero-new-plugin-template \
-  --private \
-  --clone
-cd agent-zero-plugin-<your-name>
+- **Right-click on selected message text** → custom context menu (overrides native):
+  - **Comment** — attach a note to the selection (highlighted inline, occurrence-indexed).
+  - **Copy text** — copy the selection to the clipboard.
+  - **Send to prompt** — insert the selection, quoted, into the prompt box.
+- **Inline highlights** re-anchor on reload (best-effort), one comment per span.
+- **Popover** on each highlight: view / edit / delete.
+- **Top-bar 💬 button** with a count badge → opens a modal listing every comment
+  (referenced text trimmed), where you can delete entries, add a **general comment**
+  not tied to any text, and **Send to prompt** (a numbered prompt of all comments).
+- Comments persist per-chat on the `AgentContext` (`context.data["chat_comments"]`),
+  saved via `save_tmp_chat` — the same mechanism the `chat_rename` plugin uses.
 
-# 2. Initialise the .skills submodule + link everything
-git submodule update --init -- .skills
-make link-all
+## Architecture
 
-# 3. Rename the placeholder plugin dir to your plugin's name
-git mv my_plugin <your-name>
+Pure WebUI plugin (`webui/` + `extensions/webui/chat-top-end/`) plus one thin
+`load`/`save` API handler (`api/comments.py`). No agent-side code, no secrets.
 
-# 4. Update PLUGIN_NAME in the Makefile + name fields in
-#    <your-name>/plugin.yaml, <your-name>/meta.yaml, tests/conftest.py,
-#    and pyproject.toml. Then commit + push.
-```
-
-After `make link-all`, the repo has:
-
-| Path | What it is |
+| Path | Responsibility |
 |---|---|
-| `.skills/` | Submodule → `agent-zero-plugins-skills` (24 skills) |
-| `tests/_testkit/` | Relative symlink → `.skills/vendor/a0-plugin-testkit/` |
-| `.claude/skills/`, `.github/skills/`, `.antigravity/skills/` | Skill symlinks per IDE (24 × 3) |
-| `.claude/commands/`, `.github/prompts/` | Slash-command prompts (when shared-assets/prompts/ has content) |
-| `.claude/rules/`, `.github/instructions/` | Path-scoped IDE rules (when shared-assets/instructions/ has content) |
-| `.vscode/mcp.json`, `.mcp.json` | Merged MCP server configs |
-| `.github/workflows/skills-sync.yml` | Nightly auto-sync (bumps `.skills`, relinks, opens PR) |
-| `my_plugin/` | Placeholder plugin source — rename this |
-| `tests/` | Smoke test scaffold using `a0_plugin_testkit` |
-| `pyproject.toml` | pytest + ruff + mypy config, with `tests/_testkit/src` on `pythonpath` |
-| `Makefile` | Delegates to `.skills/Makefile`; adds `plugin-zip`, `plugin-info`, `plugin-clean` |
+| `chat_comments/api/comments.py` | `load` / `save` the per-chat comment list |
+| `chat_comments/webui/anchoring.js` | DOM offset ↔ occurrence ↔ highlight helpers |
+| `chat_comments/webui/chat-comments-store.js` | Alpine store: menu, popovers, anchoring, send-all |
+| `chat_comments/webui/comments-modal.html` | Comments manager modal |
+| `chat_comments/extensions/webui/chat-top-end/chat-comments-mount.html` | Top-bar button + bootstrap + styles |
 
-## Skills you get out of the box
-
-The `.skills` submodule provides 24 skills covering everything you need
-for plugin development — load any of them in your IDE:
-
-| Group | Skill | When |
-|---|---|---|
-| `plugins/` | `plugin-manifest-contract` | Before you write any code — the rules the gate's CI enforces |
-| `plugins/` | `author-plugin-from-template` | Using this very template |
-| `plugins/` | `contribute-plugin-to-gate` | Once the plugin is built — zip + PR to the gate |
-| `plugins/` | `consume-plugin-in-env` | Operator-side wiring after the gate publishes |
-| `plugins/` | `rotate-plugin-credentials` | Refresh secrets without redeploying |
-| `plugins/` | `troubleshoot-plugin-deployment` | When something fails to load |
-| `plugins/` | `curate-vendor-plugins-gate` | Maintainer's view of incoming PRs |
-| `a0/` | `a0-plugin-router` | Entry point — routes to specialist a0 skills |
-| `a0/` | `a0-create-plugin` | A0 framework's plugin authoring conventions |
-| `a0/` | `a0-debug-plugin` | A0's diagnostic recipes |
-| `a0/` | `a0-manage-plugin` | Plugin Hub, install/update/uninstall |
-| `a0/` | `a0-review-plugin` | Audit before contributing |
-| `a0/` | `a0-contribute-plugin` | Community Plugin Index workflow |
-| `a0/` | `a0-plugin-testkit` | Test harness reference + assertion catalogue |
-| `a0/` | `a0-development` | Broader A0 framework dev |
-| `org/` | `bootstrap-plugins-repo` | What this template implements |
-| `org/` | `plugins-org-issue-management` | Where issues go across plugins-org repos |
-| `meta-skills/` | `manage-skills` / `manage-prompts` / etc. | Operate the skills library itself |
-
-## Step-by-step authoring flow
-
-1. **Pick a shape**. Read [`a0-plugin-router`](.claude/skills/a0-plugin-router/SKILL.md) and decide whether your plugin is a tool, extension, or hook.
-2. **Read the contract**. [`plugin-manifest-contract`](.claude/skills/plugin-manifest-contract/SKILL.md) lists the static checks the gate enforces. Internalise them before writing — retrofitting is annoying.
-3. **Fill in the placeholder**. Rename `my_plugin/` and update `name:` / `version:` / `description:` in `plugin.yaml` + `meta.yaml`. Update `PLUGIN_NAME` in `Makefile`. Update the plugin dir name in `tests/conftest.py`.
-4. **Implement**. Add tools / extensions / hooks to `<your-name>/__init__.py`. Use `os.getenv()` for any credentials (never `default_config.yaml`, never `<input type="password">`).
-5. **Test**. `pytest` runs the smoke test out of the box. Add testkit assertions per the [`a0-plugin-testkit`](.claude/skills/a0-plugin-testkit/SKILL.md) skill.
-6. **Package**. `make plugin-zip` produces `dist/<your-name>-<version>.zip`.
-7. **PR to the gate**. Drop the zip + `<your-name>.meta.yaml` into `agent-zero-vendor-plugins/plugins/`, open a PR. Follow [`contribute-plugin-to-gate`](.claude/skills/contribute-plugin-to-gate/SKILL.md).
-
-## Keeping the skills submodule fresh
-
-The `.github/workflows/skills-sync.yml` workflow installed by
-`make link-workflows` runs nightly at 03:00 UTC. It bumps the `.skills`
-submodule to the latest `main`, re-runs `link-all`, and opens a PR with
-auto-merge enabled.
-
-For an on-demand refresh:
+## Build
 
 ```bash
-make update-skills
-git commit -m 'chore: update skills submodule'
-git push
+make plugin-info   # name + version + output path
+make plugin-zip    # build dist/chat_comments-<version>.zip for gate submission
+make test          # smoke tests (a0_plugin_testkit)
 ```
 
-## Differences from a forked vendor plugin
+## Publishing
 
-This template is for **org-owned plugin sources** — code you author from
-scratch in the `agent-zero-plugins` org. If you're instead adapting an
-upstream community plugin, the path is different: fork it under
-`agent-zero-plugins/agent-zero-plugin-<name>`, conform it to the
-manifest contract per [`plugin-manifest-contract`](.claude/skills/plugin-manifest-contract/SKILL.md),
-then bootstrap the `.skills` submodule per
-[`bootstrap-plugins-repo`](.claude/skills/bootstrap-plugins-repo/SKILL.md).
+`make plugin-zip`, then PR `plugins/chat_comments.zip` + `plugins/chat_comments.meta.yaml`
+into [`agent-zero-vendor-plugins`](https://github.com/agent-zero-plugins/agent-zero-vendor-plugins).
+Merging publishes `ghcr.io/agent-zero-plugins/chat_comments:<version>`, consumable from any
+`agent-zero-infra` env via `agent.plugins.oci[]`.
 
 ## License
 
-Apache-2.0.
+See [LICENSE](LICENSE).

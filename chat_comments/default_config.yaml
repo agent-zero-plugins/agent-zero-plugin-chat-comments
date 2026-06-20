@@ -1,0 +1,3 @@
+# Chat Comments has no configurable settings — comments are stored per-chat on
+# the AgentContext (context.data["chat_comments"]). This file is intentionally
+# empty of options; it exists to satisfy the plugin packaging convention.

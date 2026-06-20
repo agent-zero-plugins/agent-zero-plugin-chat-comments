@@ -1,0 +1,4 @@
+name: chat_comments
+version: "0.1.0"
+summary: Select text in a chat message to attach Google-Docs-style comments, persisted on the chat, then send them all to the prompt box.
+env: []

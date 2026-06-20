@@ -1,0 +1,141 @@
+<html>
+<head>
+  <script type="module">
+    import { store } from "/plugins/chat_comments/webui/chat-comments-store.js";
+  </script>
+</head>
+<body>
+  <div x-data>
+    <template x-if="$store.chatComments">
+      <button
+        type="button"
+        class="cc-toolbar-btn"
+        x-create="$store.chatComments.bootstrap()"
+        @click="$store.chatComments.openCommentsModal()"
+        :title="$store.chatComments.comments.length + ' comment(s)'"
+        aria-label="Open comments">
+        <span class="material-symbols-outlined">comment</span>
+        <span class="cc-badge"
+              x-show="$store.chatComments.comments.length"
+              x-text="$store.chatComments.comments.length"></span>
+      </button>
+    </template>
+  </div>
+
+  <style>
+    /* Top-bar button */
+    .cc-toolbar-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: var(--color-text, #ddd);
+      opacity: 0.8;
+    }
+    .cc-toolbar-btn:hover { opacity: 1; }
+    .cc-toolbar-btn .material-symbols-outlined { font-size: 20px; }
+    .cc-badge {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 3px;
+      border-radius: 8px;
+      background: var(--color-primary, #4a90d9);
+      color: #fff;
+      font-size: 10px;
+      line-height: 15px;
+      text-align: center;
+    }
+
+    /* Inline highlight */
+    .cc-highlight {
+      background: rgba(255, 213, 0, 0.32);
+      border-bottom: 2px solid rgba(255, 193, 7, 0.9);
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    /* Floating surfaces shared look */
+    .cc-menu, .cc-editor, .cc-popover {
+      position: fixed;
+      z-index: 100000;
+      background: var(--color-panel, #2b2b2b);
+      color: var(--color-text, #eee);
+      border: 1px solid var(--color-border, #444);
+      border-radius: 8px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Context menu */
+    .cc-menu { padding: 4px; min-width: 160px; }
+    .cc-menu-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      background: transparent;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .cc-menu-item:hover { background: rgba(255, 255, 255, 0.08); }
+
+    /* Editor */
+    .cc-editor { padding: 8px; width: 260px; }
+    .cc-editor-input {
+      width: 100%;
+      min-height: 64px;
+      resize: vertical;
+      background: var(--color-input, #1e1e1e);
+      color: inherit;
+      border: 1px solid var(--color-border, #444);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+    .cc-editor-actions, .cc-popover-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    /* Popover */
+    .cc-popover { padding: 10px; width: 240px; }
+    .cc-popover-text {
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 6px;
+    }
+
+    /* Buttons */
+    .cc-btn {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--color-border, #444);
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .cc-btn:hover { background: rgba(255, 255, 255, 0.08); }
+    .cc-btn-primary {
+      background: var(--color-primary, #4a90d9);
+      border-color: transparent;
+      color: #fff;
+    }
+    .cc-btn-danger { color: #ff6b6b; }
+  </style>
+</body>
+</html>

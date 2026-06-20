@@ -1,0 +1,2 @@
+DATA_KEY = "chat_comments"
+MAX_COMMENT_LENGTH = 2000

@@ -18,6 +18,4 @@ def plugin_dir() -> Path:
         assert_no_dead_plugin_hooks(plugin_dir)
         etc.
     """
-    # Replace `my_plugin` with your plugin's directory name after cloning
-    # this template.
-    return Path(__file__).resolve().parent.parent / "my_plugin"
+    return Path(__file__).resolve().parent.parent / "chat_comments"
