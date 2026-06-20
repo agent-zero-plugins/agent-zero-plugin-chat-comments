@@ -1,3 +1,3 @@
-[submodule ".skills"]
-	path = .skills
-	url = https://github.com/agent-zero-plugins/agent-zero-plugins-skills.git
+[submodule "tests/_testkit"]
+	path = tests/_testkit
+	url = https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit.git
