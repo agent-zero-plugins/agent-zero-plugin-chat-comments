@@ -1,0 +1,45 @@
+[project]
+name = "agent-zero-plugin-my-plugin"
+version = "0.1.0"
+description = "Replace this — short description of what this plugin does."
+requires-python = ">=3.11"
+
+# ── pytest ───────────────────────────────────────────────────────────────────
+# The testkit is provided by the agent-zero-plugins-skills submodule via
+# `make link-testkit` (or `make link-all`), which creates a relative symlink
+# at tests/_testkit → .skills/vendor/a0-plugin-testkit. pyproject's
+# pythonpath picks up the testkit's src/ so `from a0_plugin_testkit.X import Y`
+# works in your tests with no extra install step.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests/_testkit/src"]
+# The testkit ships its own self-tests under tests/_testkit/tests/.
+# Exclude them so pytest doesn't try to collect the testkit's own suite
+# alongside this plugin's tests.
+norecursedirs = ["tests/_testkit", "dist", "build"]
+asyncio_mode = "auto"
+markers = [
+    "unit: fast L0 tests, no subprocess, no network",
+    "component: L1 tests, A0 in-process or fixtures",
+    "integration: L2 tests, real services",
+]
+
+# ── ruff (lint + format) ─────────────────────────────────────────────────────
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── mypy ─────────────────────────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true

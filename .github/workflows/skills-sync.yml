@@ -1,0 +1,74 @@
+# ============================================================================
+# Skills Sync — Caller Template
+# ============================================================================
+#
+# Copy this file into your repo at .github/workflows/skills-sync.yml
+# (`make link-workflows` does this for you).
+#
+# Adjust `skills-submodule-path` to match your .gitmodules entry.
+#
+# ── Triggers ─────────────────────────────────────────────────────────────────
+# This workflow runs ONLY on:
+#   - schedule (nightly cron)
+#   - workflow_dispatch (manual button)
+#
+# DO NOT add `pull_request:` — fork-PR triggers are the canonical secret-
+# exfiltration vector. The reusable workflow mints a GitHub App
+# installation token from org-level secrets; exposing that to fork-author
+# code would defeat the whole least-privilege design.
+#
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# Two tokens are used, each scoped to exactly what it needs:
+#
+#   App-minted token   — ONLY for the cross-repo skills-submodule clone
+#                        (Contents: Read on the skills repo).
+#   GITHUB_TOKEN       — consumer-scoped (this repo only). Used for the
+#                        sync-branch push, the PR, and auto-merge. The
+#                        `permissions:` block below grants it the minimum
+#                        scopes it needs.
+#
+# Required org-level secrets (set on this consumer's org, scoped to this
+# repo's consumer set):
+#   SKILLS_SYNC_APP_CLIENT_ID     — the GitHub App's OAuth Client ID
+#                                   (format Iv23li…; NOT the numeric App ID)
+#   SKILLS_SYNC_APP_PRIVATE_KEY   — the App's PEM (full multi-line)
+#
+# The App must be installed on:
+#   - the skills repo (Contents: Read)
+#   - any transitive submodule the skills repo vendors (e.g. testkit).
+# It does NOT need to be installed on this consumer — GITHUB_TOKEN covers
+# everything that happens locally here.
+# ============================================================================
+
+name: Skills Sync
+
+on:
+  schedule:
+    # Nightly at 03:00 UTC.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+# Scopes granted to GITHUB_TOKEN (the runner's auto-issued, consumer-only
+# token). Used by the reusable workflow for:
+#   - contents: write     — push the chore/skills-sync branch
+#   - pull-requests: write — open / edit / auto-merge the sync PR
+# Nothing else gets through; GITHUB_TOKEN can't reach any other repo
+# regardless of the App's permissions.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    uses: agent-zero-plugins/agent-zero-plugins-skills/.github/workflows/skills-sync.yml@main
+    with:
+      # Match your .gitmodules path. Common values: ".skills", "skills".
+      skills-submodule-path: ".skills"
+    # Explicit per-name pass-through. `secrets: inherit` is the shorter
+    # equivalent in theory, but in practice it does not forward org
+    # secrets that have "selected repositories" visibility through a
+    # cross-repo workflow_call boundary — the reusable workflow validates
+    # with empty values and fails. Explicit binding sidesteps this.
+    secrets:
+      SKILLS_SYNC_APP_CLIENT_ID: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+      SKILLS_SYNC_APP_PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}

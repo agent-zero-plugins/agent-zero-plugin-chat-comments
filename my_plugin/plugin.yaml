@@ -1,0 +1,18 @@
+# Agent Zero plugin manifest. The publish workflow in
+# agent-zero-vendor-plugins reads `version:` from this file at zip time and
+# tags the OCI artifact with it (immutable :<version> tag).
+#
+# Required fields: name, version, description.
+# Optional: author, license, homepage, dependencies (declared at the A0
+#   plugin layer — independent of pyproject.toml's deps).
+#
+# `name:` MUST match this directory's name (which is also the basename of
+# plugins/<name>.zip and plugins/<name>.meta.yaml in the gate repo).
+
+name: my_plugin
+version: "0.1.0"
+description: Replace this — one-line description of what this plugin does.
+
+author: "Your Name <you@example.com>"
+license: Apache-2.0
+homepage: https://github.com/agent-zero-plugins/agent-zero-plugin-my-plugin
