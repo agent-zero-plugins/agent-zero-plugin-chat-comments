@@ -19,6 +19,4 @@ on:
 jobs:
   e2e:
     uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
-    secrets:
-      SKILLS_SYNC_APP_CLIENT_ID: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
-      SKILLS_SYNC_APP_PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+    secrets: inherit
