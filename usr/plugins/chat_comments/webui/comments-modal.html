@@ -63,6 +63,12 @@
 
   <template x-if="$store.chatComments">
     <div class="modal-footer" data-modal-footer>
+      <button
+        class="btn cc-clear-all"
+        @click="$store.chatComments.clearAllComments()"
+        :disabled="!$store.chatComments.comments.length">
+        Clear all
+      </button>
       <button class="btn btn-cancel" @click="$store.chatComments.closeCommentsModal()">
         Close
       </button>
@@ -138,6 +144,13 @@
       background: rgba(255, 255, 255, 0.08);
     }
     .cc-modal-del .material-symbols-outlined { font-size: 20px; }
+
+    /* "Clear all" sits on the far left of the footer, away from Close/Send. */
+    .cc-clear-all {
+      margin-right: auto;
+      color: #ff6b6b;
+    }
+    .cc-clear-all:disabled { opacity: 0.5; cursor: default; }
 
     .cc-modal-general-tag {
       display: inline-block;

@@ -432,6 +432,17 @@ const model = {
     closeModal(COMMENTS_MODAL_PATH);
   },
 
+  // Delete every comment in the current chat (after confirmation).
+  clearAllComments() {
+    if (!this.comments.length) return;
+    if (!confirm("Delete all comments in this chat? This cannot be undone.")) {
+      return;
+    }
+    this.comments = [];
+    void this.persist();
+    this.scheduleReanchor();
+  },
+
   // Collapse whitespace and clip to `n` chars for compact display in the modal.
   truncate(text, n) {
     const s = String(text || "").replace(/\s+/g, " ").trim();
