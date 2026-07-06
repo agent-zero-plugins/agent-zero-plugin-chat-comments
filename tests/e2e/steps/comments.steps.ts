@@ -31,10 +31,13 @@ Then("a comments control is available in the chat toolbar", async ({ loggedInPag
 });
 
 When("I add a comment to the chat", async ({ loggedInPage }: any) => {
-  await loggedInPage.evaluate((note: string) => {
+  await loggedInPage.evaluate(async (note: string) => {
     const s = (window as any).Alpine.store("chatComments");
     s.newCommentDraft = note;
     s.addGeneralComment();
+    // addGeneralComment fires persist() and-forgets; await it so the backend save
+    // completes deterministically before any reload (the slow fork raced otherwise).
+    if (typeof s.persist === "function") await s.persist();
   }, NOTE);
 });
 
