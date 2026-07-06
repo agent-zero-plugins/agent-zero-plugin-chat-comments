@@ -36,3 +36,4 @@ credentials.json
 
 # Skills submodule generated translation output
 .skills/.generated/
+node_modules
