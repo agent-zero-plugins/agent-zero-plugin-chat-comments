@@ -41,6 +41,8 @@ const model = {
   _bootstrapped: false,
   _historyObserver: null,
   _reanchorScheduled: false,
+  _clearOnNextSend: false,
+  _sendHookInstalled: false,
 
   bootstrap() {
     if (this._bootstrapped) return;
@@ -49,6 +51,7 @@ const model = {
     document.addEventListener("click", (e) => this.onDocumentClick(e));
     this._historyObserver = new MutationObserver(() => this.scheduleReanchor());
     this.connectObserver();
+    this.installSendHook();
     void this.loadForCurrentContext();
   },
 
@@ -65,6 +68,8 @@ const model = {
     const ctx = this.getContextId();
     if (!ctx) return;
     this.contextId = ctx;
+    // Switching chats cancels any pending "clear on send" from a prior chat.
+    this._clearOnNextSend = false;
     try {
       const res = await callJsonApi(API_PATH, { action: "load", context: ctx });
       this.comments = Array.isArray(res?.comments) ? res.comments : [];
@@ -96,6 +101,7 @@ const model = {
     this._reanchorScheduled = true;
     globalThis.requestAnimationFrame(() => {
       this._reanchorScheduled = false;
+      this.installSendHook();
       const ctx = this.getContextId();
       if (ctx && ctx !== this.contextId) {
         void this.loadForCurrentContext();
@@ -432,15 +438,27 @@ const model = {
     closeModal(COMMENTS_MODAL_PATH);
   },
 
-  // Delete every comment in the current chat (after confirmation).
-  clearAllComments() {
-    if (!this.comments.length) return;
-    if (!confirm("Delete all comments in this chat? This cannot be undone.")) {
-      return;
-    }
-    this.comments = [];
-    void this.persist();
-    this.scheduleReanchor();
+  // Wrap the global send once so that submitting a message auto-clears the
+  // comments — but ONLY when they were staged into the prompt via
+  // sendAllToPrompt (the _clearOnNextSend flag). A failed send throws before
+  // the clear runs; switching chats clears the flag. Idempotent + retried from
+  // scheduleReanchor in case globalThis.sendMessage isn't defined yet at boot.
+  installSendHook() {
+    if (this._sendHookInstalled) return;
+    const orig = globalThis.sendMessage;
+    if (typeof orig !== "function") return;
+    this._sendHookInstalled = true;
+    const self = this;
+    globalThis.sendMessage = async function (...args) {
+      const result = await orig.apply(this, args);
+      if (self._clearOnNextSend) {
+        self._clearOnNextSend = false;
+        self.comments = [];
+        void self.persist();
+        self.scheduleReanchor();
+      }
+      return result;
+    };
   },
 
   // Collapse whitespace and clip to `n` chars for compact display in the modal.
@@ -488,6 +506,9 @@ const model = {
       }
     });
     this.insertIntoPrompt(out.trimEnd(), "replace");
+    // Keep the comments now (staged for review); auto-clear once the user
+    // actually submits the message (installSendHook picks up this flag).
+    this._clearOnNextSend = true;
     this.closeCommentsModal();
     void toastFrontendSuccess(
       this.comments.length + " comment(s) sent to prompt.",
