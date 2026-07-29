@@ -5,3 +5,4 @@ version: 0.1.2
 settings_sections: []
 per_project_config: false
 per_agent_config: false
+license: Apache-2.0
