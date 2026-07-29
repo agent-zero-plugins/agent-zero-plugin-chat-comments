@@ -109,7 +109,10 @@ Given("the chat contains a message from me", async ({ loggedInPage }: any) => {
 
 Given("the chat contains a message from me and a reply from the agent", async ({ loggedInPage }: any) => {
   await renderMessage(loggedInPage, "e2e-user-1", "user", MSG_TEXT);
-  await renderMessage(loggedInPage, "e2e-agent-1", "agent", AGENT_TEXT);
+  // A0 taxonomy: the agent's visible reply is type "response" (renders a
+  // message-<id> container). type "agent" is internal reasoning and renders
+  // into process-group-<id>, which is not a commentable message surface.
+  await renderMessage(loggedInPage, "e2e-agent-1", "response", AGENT_TEXT);
 });
 
 Given("I have commented on a phrase inside that message", async ({ loggedInPage }: any) => {
