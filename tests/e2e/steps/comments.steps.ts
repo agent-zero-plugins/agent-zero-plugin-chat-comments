@@ -159,9 +159,22 @@ When("I change the comment's note", async ({ loggedInPage }: any) => {
 });
 
 When("I delete that comment", async ({ loggedInPage }: any) => {
-  // real path: open the comments modal, click the row's delete control
-  await loggedInPage.locator(".cc-toolbar-btn").click();
-  await loggedInPage.waitForSelector(".cc-modal-item", { timeout: 8000 });
+  // real path: open the comments modal, click the row's delete control.
+  // The fork mounts the modal lazily and can be slow, so treat "modal is open with
+  // its row rendered" as the state to reach (retrying the open click) rather than
+  // assuming a single click lands within a fixed window.
+  const row = loggedInPage.locator(".cc-modal-item").first();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await row.count() > 0) break;
+    await loggedInPage.locator(".cc-toolbar-btn").click();
+    try {
+      await row.waitFor({ state: "visible", timeout: 15000 });
+      break;
+    } catch {
+      if (attempt === 2) throw new Error("comments modal never rendered its comment row");
+    }
+  }
+  await expect(row).toBeVisible();
   await loggedInPage.locator(".cc-modal-item .cc-modal-del").first().click();
   await loggedInPage.evaluate(async () => {
     const s = (window as any).Alpine.store("chatComments");
