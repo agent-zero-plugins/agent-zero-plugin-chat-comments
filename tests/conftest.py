@@ -18,4 +18,4 @@ def plugin_dir() -> Path:
         assert_no_dead_plugin_hooks(plugin_dir)
         etc.
     """
-    return Path(__file__).resolve().parent.parent / "chat_comments"
+    return Path(__file__).resolve().parent.parent / "usr" / "plugins" / "chat_comments"
