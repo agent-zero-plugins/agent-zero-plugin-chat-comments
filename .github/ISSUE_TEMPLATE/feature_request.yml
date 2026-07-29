@@ -1,0 +1,11 @@
+name: Feature request
+description: Propose an improvement to Chat Comments
+labels: [enhancement]
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like?
+      description: The problem it solves and how you imagine it working.
+    validations:
+      required: true

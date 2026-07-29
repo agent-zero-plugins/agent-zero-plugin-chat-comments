@@ -1,0 +1,26 @@
+name: Bug report
+description: Something in Chat Comments misbehaves
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: a0-version
+    attributes:
+      label: Agent Zero version
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version (plugin.yaml)
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console / A0 log output
+      render: shell
