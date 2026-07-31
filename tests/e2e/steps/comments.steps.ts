@@ -96,8 +96,24 @@ const reloadIntoChat = async (page: any, id: string) => {
   await page.evaluate(() => (window as any).Alpine.store("chatComments").bootstrap());
 };
 
-const commentCount = (page: any) =>
-  page.evaluate(() => (window as any).Alpine.store("chatComments").comments.length);
+// Open the comments modal through the real toolbar control and wait for the
+// add-input to be interactive. Idempotent: no-op when it is already open.
+const openCommentsModal = async (page: any) => {
+  const input = page.locator(".cc-modal-add-input");
+  if (await input.isVisible().catch(() => false)) return;
+  await page.locator(".cc-toolbar-btn").click();
+  await input.waitFor({ state: "visible", timeout: 15000 });
+};
+
+const closeCommentsModal = async (page: any) => {
+  await page.evaluate(() => (window as any).Alpine.store("chatComments").closeCommentsModal());
+};
+
+// What the user can actually see: rows rendered in the comments modal.
+const visibleCommentCount = async (page: any) => {
+  await openCommentsModal(page);
+  return page.locator(".cc-modal-item").count();
+};
 
 // ── Givens ───────────────────────────────────────────────────────────────────
 
@@ -122,12 +138,15 @@ Given("I have commented on a phrase inside that message", async ({ loggedInPage 
 // ── Whens ────────────────────────────────────────────────────────────────────
 
 When("I add a comment to the chat", async ({ loggedInPage }: any) => {
-  await loggedInPage.evaluate(async (note: string) => {
-    const s = (window as any).Alpine.store("chatComments");
-    s.newCommentDraft = note;
-    s.addGeneralComment();
-    if (typeof s.persist === "function") await s.persist();
-  }, NOTE);
+  // real path: toolbar button → modal → type in the add input → click Add.
+  // No store poking and no manual persist(): if the real flow does not save,
+  // the reload assertions must catch it.
+  await openCommentsModal(loggedInPage);
+  const before = await loggedInPage.locator(".cc-modal-item").count();
+  await loggedInPage.locator(".cc-modal-add-input").fill(NOTE);
+  await loggedInPage.locator(".cc-modal-add-btn").click();
+  // end state: the row is rendered in the list the user is looking at
+  await expect(loggedInPage.locator(".cc-modal-item")).toHaveCount(before + 1);
 });
 
 When("I comment on a phrase inside that message", async ({ loggedInPage }: any) => {
@@ -159,28 +178,17 @@ When("I change the comment's note", async ({ loggedInPage }: any) => {
 });
 
 When("I delete that comment", async ({ loggedInPage }: any) => {
-  // real path: open the comments modal, click the row's delete control.
-  // The fork mounts the modal lazily and can be slow, so treat "modal is open with
-  // its row rendered" as the state to reach (retrying the open click) rather than
-  // assuming a single click lands within a fixed window.
-  const row = loggedInPage.locator(".cc-modal-item").first();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (await row.count() > 0) break;
-    await loggedInPage.locator(".cc-toolbar-btn").click();
-    try {
-      await row.waitFor({ state: "visible", timeout: 15000 });
-      break;
-    } catch {
-      if (attempt === 2) throw new Error("comments modal never rendered its comment row");
-    }
-  }
-  await expect(row).toBeVisible();
-  await loggedInPage.locator(".cc-modal-item .cc-modal-del").first().click();
-  await loggedInPage.evaluate(async () => {
-    const s = (window as any).Alpine.store("chatComments");
-    if (typeof s.persist === "function") await s.persist();
-    s.closeCommentsModal();
-  });
+  // real path: the comments modal is already open from the add step; click the
+  // row's delete control. No manual persist(): the real flow must save the
+  // deletion by itself or the reload assertion has to catch it.
+  await openCommentsModal(loggedInPage);
+  const rows = loggedInPage.locator(".cc-modal-item");
+  const before = await rows.count();
+  expect(before).toBeGreaterThan(0);
+  await loggedInPage.locator(".cc-modal-del").first().click();
+  // end state: the row the user clicked is gone from the list
+  await expect(rows).toHaveCount(before - 1);
+  await closeCommentsModal(loggedInPage);
 });
 
 When("I switch to a different chat", async ({ loggedInPage }: any) => {
@@ -219,12 +227,13 @@ When("I switch back to the first chat", async ({ loggedInPage }: any) => {
 });
 
 When("I try to add an empty comment", async ({ loggedInPage }: any) => {
-  await loggedInPage.evaluate(async () => {
-    const s = (window as any).Alpine.store("chatComments");
-    s.newCommentDraft = "   ";
-    s.addGeneralComment();
-    if (typeof s.persist === "function") await s.persist();
-  });
+  // real path: type whitespace into the add input and try to submit. The UI
+  // guards this by disabling the button, so the attempt cannot land.
+  await openCommentsModal(loggedInPage);
+  await loggedInPage.locator(".cc-modal-add-input").fill("   ");
+  await expect(loggedInPage.locator(".cc-modal-add-btn")).toBeDisabled();
+  await loggedInPage.locator(".cc-modal-add-btn").click({ force: true });
+  await closeCommentsModal(loggedInPage);
 });
 
 When("I send the comments to the prompt box", async ({ loggedInPage }: any) => {
@@ -272,20 +281,20 @@ Then("the chat shows it has two comments", async ({ loggedInPage }: any) => {
 });
 
 Then("the chat shows it has no comments", async ({ loggedInPage }: any) => {
-  // badge hides at zero — assert on the store-backed end state + hidden badge
-  await loggedInPage.waitForFunction(
-    () => (window as any).Alpine.store("chatComments").comments.length === 0,
-    { timeout: 8000 },
-  );
-  await expect(loggedInPage.locator(".cc-badge")).toBeHidden();
+  // user-visible end state: badge hidden, and the modal says there are none
+  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({ timeout: 8000 });
+  await openCommentsModal(loggedInPage);
+  await expect(loggedInPage.locator(".cc-modal-item")).toHaveCount(0);
+  await expect(loggedInPage.locator(".cc-modal-empty")).toBeVisible();
+  await closeCommentsModal(loggedInPage);
 });
 
 Then("that chat shows no comments", async ({ loggedInPage }: any) => {
-  await loggedInPage.waitForFunction(
-    () => (window as any).Alpine.store("chatComments").comments.length === 0,
-    { timeout: 10000 },
-  );
-  await expect(loggedInPage.locator(".cc-badge")).toBeHidden();
+  // the freshly-switched-to chat carries none of the first chat's comments
+  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({ timeout: 10000 });
+  await openCommentsModal(loggedInPage);
+  await expect(loggedInPage.locator(".cc-modal-item")).toHaveCount(0);
+  await closeCommentsModal(loggedInPage);
 });
 
 Then("the comment is still there after a reload", async ({ loggedInPage }: any) => {
@@ -295,11 +304,10 @@ Then("the comment is still there after a reload", async ({ loggedInPage }: any) 
 });
 
 Then("the comment is gone after a reload", async ({ loggedInPage }: any) => {
-  await loggedInPage.waitForTimeout(1200);
   await reloadIntoChat(loggedInPage, ctx);
-  const n = await commentCount(loggedInPage);
-  expect(n).toBe(0);
-  await expect(loggedInPage.locator(".cc-badge")).toBeHidden();
+  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({ timeout: 10000 });
+  expect(await visibleCommentCount(loggedInPage)).toBe(0);
+  await closeCommentsModal(loggedInPage);
 });
 
 Then("the phrase is highlighted in the message", async ({ loggedInPage }: any) => {
