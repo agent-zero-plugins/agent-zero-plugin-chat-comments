@@ -100,7 +100,9 @@ const reloadIntoChat = async (page: any, id: string) => {
 // add-input to be interactive. Idempotent: no-op when it is already open.
 const openCommentsModal = async (page: any) => {
   const input = page.locator(".cc-modal-add-input");
-  if (await input.isVisible().catch(() => false)) return;
+  // isVisible() resolves false for a not-yet-rendered element (it does not
+  // throw), so this stays idempotent without swallowing a real failure.
+  if (await input.isVisible()) return;
   await page.locator(".cc-toolbar-btn").click();
   await input.waitFor({ state: "visible", timeout: 15000 });
 };
