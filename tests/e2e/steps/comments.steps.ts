@@ -14,6 +14,26 @@ const waitStore = (page: any) =>
     { timeout: 15000 },
   );
 
+// Wait for the plugin's OWN save round-trip to the backend.
+//
+// The store fires its saves as `void this.persist()` (chat-comments-store.js
+// L277 add-anchored, L422 editComment) — deliberately fire-and-forget, so a
+// reload immediately after a UI action can outrun the request. The steps used
+// to work around that by calling `store.persist()` from the test, which made
+// the TEST perform the save it was supposed to be verifying: if the plugin ever
+// stopped saving on its own, the scenario would still have gone green.
+//
+// Waiting on the real request keeps the determinism without the cheat. Start it
+// BEFORE the click that triggers the save, then await it after.
+const waitForSave = (page: any) =>
+  page.waitForResponse(
+    (r: any) =>
+      r.url().includes("/plugins/chat_comments/comments") &&
+      r.request().method() === "POST" &&
+      (r.request().postData() || "").includes('"save"'),
+    { timeout: 15000 },
+  );
+
 const openChat = async (page: any) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
@@ -80,12 +100,13 @@ const commentOnPhrase = async (page: any, msgId: string, phrase: string, note: s
   await page.locator('.cc-menu .cc-menu-item', { hasText: "Comment" }).first().click();
   await page.waitForSelector(".cc-editor-input", { timeout: 5000 });
   await page.locator(".cc-editor-input").fill(note);
+  // The plugin's own save is fire-and-forget (`void this.persist()` in the
+  // store), so a reload can race it. Wait for the REAL save request the plugin
+  // issues rather than poking the store to persist for it — the test must not
+  // perform the behaviour it is verifying.
+  const saved = waitForSave(page);
   await page.locator(".cc-editor .cc-btn-primary").click();
-  // deterministic backend save before any reload
-  await page.evaluate(async () => {
-    const s = (window as any).Alpine.store("chatComments");
-    if (typeof s.persist === "function") await s.persist();
-  });
+  await saved;
 };
 
 const reloadIntoChat = async (page: any, id: string) => {
@@ -172,11 +193,11 @@ When("I change the comment's note", async ({ loggedInPage }: any) => {
   await loggedInPage.locator(".cc-popover .cc-btn", { hasText: "Edit" }).click();
   await loggedInPage.waitForSelector(".cc-editor-input", { timeout: 5000 });
   await loggedInPage.locator(".cc-editor-input").fill(EDITED);
+  // Same reasoning as commentOnPhrase: editComment() calls `void this.persist()`,
+  // so wait for the plugin's own save request instead of persisting for it.
+  const saved = waitForSave(loggedInPage);
   await loggedInPage.locator(".cc-editor .cc-btn-primary").click();
-  await loggedInPage.evaluate(async () => {
-    const s = (window as any).Alpine.store("chatComments");
-    if (typeof s.persist === "function") await s.persist();
-  });
+  await saved;
 });
 
 When("I delete that comment", async ({ loggedInPage }: any) => {
