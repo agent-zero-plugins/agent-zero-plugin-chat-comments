@@ -79,6 +79,49 @@ machine running Agent Zero.**
 
 ---
 
+## Usage
+
+Every behaviour below is covered by a BDD scenario in [`tests/e2e/features/`](tests/e2e/features/),
+and [`docs/BEHAVIOUR.md`](docs/BEHAVIOUR.md) shows each one as a screenshot captured from a passing
+run — so what you read here is what CI proves on every push.
+
+### Comment on a phrase inside a message
+
+Select any text in a message (yours or the agent's) and choose **Comment** from the selection menu.
+The phrase is wrapped in a highlight and the comment records the text it refers to, so the note still
+makes sense when you come back to it later. Click a highlight to reopen the note, with **Edit** and
+**Delete**.
+
+One message can carry several comments, and re-anchoring is occurrence-based — the highlight survives
+the re-renders A0 does as a chat grows.
+
+### Comment on the chat as a whole
+
+Open the toolbar control and add a note without selecting anything first. Useful for "this whole
+exchange went wrong" observations that do not belong to one phrase.
+
+### Turn your comments into a prompt
+
+**Send to prompt** collapses every comment on the chat into a single numbered instruction and drops it
+into the composer. Anchored comments quote the text they refer to, so the agent sees both your note
+and what it was about. This is the point of the plugin: review the transcript, mark it up, then hand
+the whole critique back in one turn instead of retyping it.
+
+### What persists
+
+Comments are stored on the chat, not in the browser. Switch to another chat and back, or reload, and
+they are still there — the `A comment added to a chat is remembered` scenario asserts exactly that,
+including across a reload.
+
+The toolbar badge shows a live count so you can see at a glance whether a chat has been annotated.
+
+### What it refuses
+
+An empty comment is rejected rather than silently stored, and the backing service rejects malformed
+requests instead of accepting partial data. Both are asserted scenarios, not just intentions.
+
+---
+
 ## Install
 
 ### Plugin Hub (recommended)
