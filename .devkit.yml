@@ -1,3 +1,11 @@
 plugin_dir: usr/plugins/chat_comments
 display_name: Chat Comments
 devkit_major: 2
+
+# Test against UPSTREAM A0, not the private fork (DEC-082).
+#
+# The devkit default is ghcr.io/nuevanext/agent-zero:latest-nonroot, so without
+# this line every PR proved the plugin worked on the fork while upstream — the
+# only thing anyone actually runs — was verified nowhere. Overriding per repo
+# rather than changing the devkit default keeps the blast radius to this plugin.
+a0_image: docker.io/agent0ai/agent-zero:latest
