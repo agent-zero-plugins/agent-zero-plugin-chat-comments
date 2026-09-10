@@ -1,0 +1,8 @@
+name: chat_comments
+title: Chat Comments
+description: Select text in a chat message to attach Google-Docs-style comments, persisted on the chat, then send them all to the prompt box.
+version: 0.1.2
+settings_sections: []
+per_project_config: false
+per_agent_config: false
+license: Apache-2.0
