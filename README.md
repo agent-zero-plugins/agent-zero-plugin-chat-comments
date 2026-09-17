@@ -6,204 +6,84 @@
 
 <!-- BADGES:END -->
 
-> Select text in any chat message and attach a **Google-Docs-style comment** to it.
-> Comments are highlighted inline, listed in a manager modal, **persisted per chat**,
-> and can be sent to the prompt box as a single review request for the agent to address.
+> Select text in any chat message and attach a **Google-Docs-style comment** to it. Comments are highlighted inline, persisted per chat, and sendable to the prompt as one numbered review request.
 
-`chat_comments` turns an Agent Zero conversation into something you can *mark up*. Reviewing a long
-agent answer? Highlight the sentence that's wrong, comment on it, and — when you're done — send every
-comment to the prompt in one go so the agent addresses them together.
+![Chat Comments in action](docs/cc.gif)
 
----
+Chat_comments turns an Agent Zero conversation into something you can mark up. Reviewing a long agent answer? Highlight the sentence that's wrong, comment on it, and, when you're done, send every comment to the prompt in one go so the agent addresses them together.
 
-## Why you'd want it
+## ✨ Features
 
-| Without | With Chat Comments |
-|---|---|
-| Scroll back, retype "the third paragraph is wrong because…" | Select the text → **Comment** → it's anchored right there |
-| Lose your review notes when you switch chats | Comments **persist on the chat**, survive reloads and chat switches |
-| Feed corrections one message at a time | **Send to prompt** bundles every comment into one numbered request |
-| No record of what you flagged | A comments modal lists every note, anchored or general |
+- **Anchored comments** : select a phrase in any message (yours or the agent's) → right-click → **Comment**. The phrase gets an inline highlight that survives re-renders via occurrence-based re-anchoring.
+- **General comments** : chat-level notes that aren't tied to any span, for "this whole exchange went wrong" moments.
+- **Manage from one place** : click a highlight for its popover (**Edit** / **Delete**), or open the toolbar modal to see every note; the toolbar button carries a live count badge.
+- **Send to prompt** : collapses all comments into a single numbered instruction — anchored items quote their text — and drops it into the composer. Review the transcript, then hand the whole critique back in one turn.
+- **Persistence** : comments are stored on the chat itself (`usr/chats/<id>/chat.json`), so they survive reloads and chat switches.
+- **Honest refusals** : empty comments are rejected, and the backing service refuses malformed requests — both are asserted BDD scenarios.
 
----
+## ⚙️ How it works
 
-## Features
+![How it works](docs/how-it-works.png)
 
-- **Anchor a comment to selected text** — right-click a selection inside a message → *Comment*; the
-  phrase is wrapped in a highlight (`<mark>`) that survives re-renders via occurrence-based re-anchoring.
-- **General (untethered) comments** — add a chat-level note from the modal that isn't tied to any span.
-- **View / edit / delete** — click a highlight for a popover with the note plus Edit and Delete.
-- **Persistence** — comments are stored on the chat itself and reload with it; switch away and back and
-  they're still there.
-- **Send to prompt** — turns all comments into one numbered instruction (anchored items quote their
-  referenced text) and drops it into the composer.
-- **Copy / send a selection** — the selection menu also offers *Copy text* and *Send to prompt* (append).
-- **Badge** — the toolbar button shows a live count.
 
----
+A `chat-top-end` webui extension plus one API handler. Every create/edit/delete saves through the plugin's own endpoint; bootstrap and chat switches load the same key back and re-anchor. No external network calls, no telemetry.
 
-## Architecture
+## 💬 Usage
 
-```mermaid
-flowchart TD
-    subgraph Browser["Browser (Alpine store: chatComments)"]
-        BTN["chat-top-end button<br/>(cc-toolbar-btn + badge)"]
-        SEL["contextmenu over a selection<br/>inside #message-&lt;id&gt;"]
-        MENU["cc-menu:<br/>Comment · Copy · Send to prompt"]
-        EDIT["cc-editor / cc-popover<br/>create · edit · delete"]
-        ANCH["anchoring.js<br/>occurrence-based &lt;mark&gt; re-anchor"]
-        MODAL["comments-modal.html<br/>list · General tag · Send to prompt"]
-        OBS["MutationObserver on #chat-history<br/>→ re-anchor / reload on chat switch"]
-    end
+Nothing to configure — the comment button appears in the chat top bar. Every behaviour below has an asserted [BDD scenario](tests/e2e/features/), and [`docs/BEHAVIOUR.md`](docs/BEHAVIOUR.md) shows each as a screenshot from a passing run.
 
-    subgraph Backend["Agent Zero backend"]
-        API["api/comments.py<br/>ApiHandler /plugins/chat_comments/comments"]
-        CTX["AgentContext.data['chat_comments']"]
-        DISK[("usr/chats/&lt;ctxid&gt;/chat.json<br/>via save_tmp_chat")]
-    end
+**Anchored comments** — select text, right-click, **Comment**. One message can carry several; the comment records which text it refers to, so the note still makes sense later. Click a highlight to reopen, edit, or delete it.
 
-    SEL --> MENU --> EDIT --> ANCH
-    BTN --> MODAL
-    EDIT -->|"POST action:save"| API
-    MODAL -->|"POST action:save"| API
-    OBS -->|"POST action:load"| API
-    API --> CTX --> DISK
-    DISK -->|"action:load on bootstrap / switch"| API --> ANCH
-```
+**General comments & send-to-prompt** — open the toolbar modal to add a chat-level note, or hit **Send to prompt** to bundle every comment into one numbered request for the agent. The selection menu also offers _Copy text_ and a direct _Send to prompt_.
 
-**Persistence flow:** every create/edit/delete calls `persist()` → `POST {action:"save"}` →
-`api/comments.py` sanitises the list and writes `AgentContext.data["chat_comments"]`, then
-`save_tmp_chat` flushes it to `usr/chats/<ctxid>/chat.json`. On bootstrap and on chat switch the store
-`POST {action:"load"}`s that same key back and re-anchors the highlights. **No data ever leaves the
-machine running Agent Zero.**
+## 📦 Installation
 
----
+**Plugin Hub** — once listed in the [Plugin Index](https://github.com/agent0ai/a0-plugins): **Settings → Plugins → Chat Comments → Install**.
 
-## Usage
-
-Every behaviour below is covered by a BDD scenario in [`tests/e2e/features/`](tests/e2e/features/),
-and [`docs/BEHAVIOUR.md`](docs/BEHAVIOUR.md) shows each one as a screenshot captured from a passing
-run — so what you read here is what CI proves on every push.
-
-### Comment on a phrase inside a message
-
-Select any text in a message (yours or the agent's) and choose **Comment** from the selection menu.
-The phrase is wrapped in a highlight and the comment records the text it refers to, so the note still
-makes sense when you come back to it later. Click a highlight to reopen the note, with **Edit** and
-**Delete**.
-
-One message can carry several comments, and re-anchoring is occurrence-based — the highlight survives
-the re-renders A0 does as a chat grows.
-
-### Comment on the chat as a whole
-
-Open the toolbar control and add a note without selecting anything first. Useful for "this whole
-exchange went wrong" observations that do not belong to one phrase.
-
-### Turn your comments into a prompt
-
-**Send to prompt** collapses every comment on the chat into a single numbered instruction and drops it
-into the composer. Anchored comments quote the text they refer to, so the agent sees both your note
-and what it was about. This is the point of the plugin: review the transcript, mark it up, then hand
-the whole critique back in one turn instead of retyping it.
-
-### What persists
-
-Comments are stored on the chat, not in the browser. Switch to another chat and back, or reload, and
-they are still there — the `A comment added to a chat is remembered` scenario asserts exactly that,
-including across a reload.
-
-The toolbar badge shows a live count so you can see at a glance whether a chat has been annotated.
-
-### What it refuses
-
-An empty comment is rejected rather than silently stored, and the backing service rejects malformed
-requests instead of accepting partial data. Both are asserted scenarios, not just intentions.
-
----
-
-## Install
-
-### Plugin Hub (recommended)
-
-Open **Settings → Plugins**, find **Chat Comments**, and install. Enable it; the comment button appears
-in the chat top bar.
-
-### Manual
-
-Copy the plugin into your Agent Zero instance:
+**Manual** (Zip) — build it yourself, or grab the zip from the [latest release](https://github.com/agent-zero-plugins/agent-zero-plugin-chat-comments/releases/latest):
 
 ```bash
-cp -r usr/plugins/chat_comments /path/to/agent-zero/usr/plugins/chat_comments
+make package        # → dist/chat_comments.zip
 ```
 
-Restart / reload plugins. No configuration required.
+Then **Settings → Plugins → Install from file** → pick the zip. Or copy the plugin into your instance (`usr/plugins/chat_comments/`) and reload plugins.
 
----
+## 🔧 Configuration
 
-## Configuration
+None — zero-config, no settings screen. One internal constant: `MAX_COMMENT_LENGTH = 2000` (both client and server clip to it).
 
-The plugin is zero-config. For reference:
+## 🛠️ Development
 
-| Manifest field | Value | Meaning |
-|---|---|---|
-| `name` | `chat_comments` | plugin id (matches the Plugin Index folder) |
-| `settings_sections` | `[]` | no settings screen — nothing to configure |
-| `per_project_config` | `false` | comments are per-chat, not per-project |
-| `per_agent_config` | `false` | not agent-scoped |
-| `license` | `Apache-2.0` | see [LICENSE](LICENSE) |
+```bash
+git clone --recurse-submodules https://github.com/agent-zero-plugins/agent-zero-plugin-chat-comments
+cd agent-zero-plugin-chat-comments
 
-Internal constant: `MAX_COMMENT_LENGTH = 2000` (both client and server clip to this).
-
----
-
-## Comment record schema
+make verify                  # BDD static gates
+python -m pytest tests -q    # unit + L1 shape suite (needs tests/_testkit submodule)
+make e2e                     # full behaviour BDD run on a nested disposable A0 (podman)
+```
 
 Each comment persisted on a chat:
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | str | client-generated uuid |
-| `message_id` | str | id of the message the highlight anchors to (`""` for General) |
-| `quoted_text` | str | the selected text (`""` for General) |
-| `occurrence` | int | which match of `quoted_text` in the message (0-based) |
-| `comment` | str | the note (≤2000 chars) |
-| `created_at` | int | unix seconds |
+| Field         | Type | Notes                                                 |
+| ------------- | ---- | ----------------------------------------------------- |
+| `id`          | str  | client-generated uuid                                 |
+| `message_id`  | str  | message the highlight anchors to (`""` for General)   |
+| `quoted_text` | str  | the selected text (`""` for General)                  |
+| `occurrence`  | int  | which match of `quoted_text` in the message (0-based) |
+| `comment`     | str  | the note (≤2000 chars)                                |
+| `created_at`  | int  | unix seconds                                          |
 
----
+## 🧪 Test layout
 
-## Development & testing
+| Layer         | Where                            | What                                                                    |
+| ------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| L1 shape      | `tests/test_plugin_shape.py`     | static validator, deps/A0-API audits, dead hooks                        |
+| Static gates  | `make verify`                    | feature-purity, honesty, traceability                                   |
+| Behaviour BDD | `tests/e2e/features/` + `steps/` | anchored/general comments, edit/delete, persistence, refusals, e2e APIs |
 
-```bash
-git clone --recursive https://github.com/agent-zero-plugins/agent-zero-plugin-chat-comments
-cd agent-zero-plugin-chat-comments
+Specs live in [`docs/spec/`](docs/spec/) (BEH-1..14). CI runs the whole pyramid on every PR, including a seam-off red-proof — a scenario that passes without the plugin fails the build.
 
-# L1 shape suite (fast, testkit assertions)
-pip install pytest pyyaml
-pytest                       # 11 tests: extension surface, hooks, thumbnail, deps, A0-API, auth posture
+## ⚖️ License
 
-# Tier-1 BDD static gates (feature-purity, honesty, traceability)
-make verify
-
-# Full L3 behaviour BDD against a disposable A0 (needs podman/docker)
-make e2e
-```
-
-The behaviour contract lives in [`docs/spec/`](docs/spec/) (`behaviour-spec.md` BEH-1..14) and the
-executable BDD in [`tests/e2e/features/10-comments.feature`](tests/e2e/features/10-comments.feature).
-CI (`plugin-e2e`) runs the full suite on every PR, including a **seam-off red-proof** (the suite must
-fail with the plugin uninstalled) — so green means the behaviour is genuinely exercised live.
-
----
-
-## Security
-
-Comments live only in your chat data (`AgentContext.data["chat_comments"]` → `usr/chats/<id>/chat.json`)
-on the machine running Agent Zero. The plugin makes **no external network calls** and adds **no**
-telemetry. See [SECURITY.md](SECURITY.md).
-
----
-
-## License
-
-[Apache-2.0](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE). Comments never leave the machine running Agent Zero; see [SECURITY.md](SECURITY.md).
