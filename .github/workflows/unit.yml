@@ -1,0 +1,43 @@
+name: unit
+# Python unit suite (shape/skill contract tests).
+#
+# The testkit submodule is PRIVATE — the default GITHUB_TOKEN cannot clone it.
+# Mirror the reusable plugin-e2e workflow: checkout without submodules, mint a
+# GitHub App token (same sync-App secrets), init the submodule with it.
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Mint App token (private submodule clone)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+          owner: agent-zero-plugins
+      - name: Init testkit submodule (App token)
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          AUTH=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          # --recursive: the L1 shape tests audit the plugin against REAL A0
+          # source, which the testkit resolves from its nested (public)
+          # .agent-zero submodule.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            submodule update --init --recursive tests/_testkit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: python -m pip install --upgrade pip pytest pytest-asyncio pyyaml
+      - name: Run unit suite
+        run: python -m pytest tests -q

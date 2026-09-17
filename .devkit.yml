@@ -1,4 +1,4 @@
-plugin_dir: usr/plugins/chat_comments
+plugin_dir: .
 display_name: Chat Comments
 devkit_major: 2
 

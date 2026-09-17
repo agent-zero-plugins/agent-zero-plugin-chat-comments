@@ -26,6 +26,10 @@ name: plugin-e2e
 on:
   pull_request:
     branches: ["main", "master"]
+  # push on main: proves the shipped code, and gives the README badge a status
+  # (PR-only runs leave branch=main with zero runs → "no status").
+  push:
+    branches: ["main", "master"]
   workflow_dispatch:
     inputs:
       capture_all_traces:
@@ -35,8 +39,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # merge-guard drafts a PR whose plugin-e2e is red
-  actions: write         # DEC-074 count-based artifact retention: delete superseded e2e artifacts
+  pull-requests: write # merge-guard drafts a PR whose plugin-e2e is red
+  actions: write # DEC-074 count-based artifact retention: delete superseded e2e artifacts
 
 jobs:
   e2e:

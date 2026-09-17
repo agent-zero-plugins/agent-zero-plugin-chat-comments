@@ -10,7 +10,11 @@ const AGENT_TEXT = "Certainly, here is the answer you requested about foxes.";
 
 const waitStore = (page: any) =>
   page.waitForFunction(
-    () => !!((window as any).Alpine?.store && (window as any).Alpine.store("chatComments")),
+    () =>
+      !!(
+        (window as any).Alpine?.store &&
+        (window as any).Alpine.store("chatComments")
+      ),
     { timeout: 15000 },
   );
 
@@ -34,9 +38,26 @@ const waitForSave = (page: any) =>
     { timeout: 15000 },
   );
 
+// A0 re-toasts unread notifications on every page load. The harness installs
+// the plugin at runtime, so A0 fires "Plugins with frontend extensions
+// updated, page reload recommended" — and the toast sits bottom-right, over
+// the comments UI, swallowing clicks (a click on a toast BODY even opens the
+// A0 notifications modal, which then intercepts everything). Dismiss via the
+// toast's own × — `.toast-dismiss` uses @click.stop, so it never opens the
+// modal. Runs after every page.goto, not once per suite, because the store
+// resets and re-toasts on each load.
+const dismissNotificationToasts = async (page: any) => {
+  for (let i = 0; i < 3; i++) {
+    const dismiss = page.locator(".toast-stack-container .toast-dismiss");
+    if (!(await dismiss.count())) break;
+    await dismiss.first().click();
+  }
+};
+
 const openChat = async (page: any) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
+  await dismissNotificationToasts(page);
   ctx = await page.evaluate(async () => {
     const { callJsonApi } = await import("/js/api.js");
     const r = await callJsonApi("/chat_create", {});
@@ -45,59 +66,131 @@ const openChat = async (page: any) => {
     return id;
   });
   await waitStore(page);
-  await page.evaluate(() => (window as any).Alpine.store("chatComments").bootstrap());
+  await page.evaluate(() =>
+    (window as any).Alpine.store("chatComments").bootstrap(),
+  );
 };
 
 // Render a deterministic LLM-less message via A0's real renderer, then re-bootstrap
 // observation. type: "user" | "agent". Returns the message container id.
-const renderMessage = async (page: any, id: string, type: string, content: string) => {
+const renderMessage = async (
+  page: any,
+  id: string,
+  type: string,
+  content: string,
+) => {
   await page.evaluate(
     async ({ id, type, content }: any) => {
       const m = await import("/js/messages.js");
-      await m.setMessage({ id, no: Date.now() % 100000, type, heading: "", content, temp: false, kvps: type === "agent" ? { thoughts: content } : null });
+      await m.setMessage({
+        id,
+        no: Date.now() % 100000,
+        type,
+        heading: "",
+        content,
+        temp: false,
+        kvps: type === "agent" ? { thoughts: content } : null,
+      });
     },
     { id, type, content },
   );
   await page.waitForSelector(`#message-${id}`, { timeout: 10000 });
+  injectedMessages.set(id, { type, content });
+};
+
+// Injected messages exist only in the DOM, not in the server's raw log. A0
+// rebuilds the chat from that log (`setMessages`, called from poll/WS) whenever
+// the backend pushes it — and our comment save (`save_tmp_chat`) triggers
+// exactly that. So a message can vanish between steps. Re-inject any that
+// disappeared: A0's DOM mutation then fires the plugin's own observer, which
+// re-anchors highlights through the real path — no assertion is weakened.
+const injectedMessages = new Map<string, { type: string; content: string }>();
+const ensureInjected = async (page: any) => {
+  for (const [id, spec] of injectedMessages) {
+    if (!(await page.locator(`#message-${id}`).count())) {
+      await renderMessage(page, id, spec.type, spec.content);
+    }
+  }
+};
+
+// Healing poll: A0's async history rebuild can wipe an injected message (and
+// with it the plugin's highlights) at any instant — including INSIDE a plain
+// toHaveCount window, which would then fail without anything real being wrong.
+// expect(callback).toPass() re-runs the whole block until it holds, and each
+// run re-heals first, so a mid-poll wipe is recovered rather than fatal.
+const expectHealed = async (
+  page: any,
+  assert: (p: any) => Promise<void>,
+  timeout = 10000,
+) => {
+  await expect(async () => {
+    await ensureInjected(page);
+    await assert(page);
+  }).toPass({ timeout });
 };
 
 // Select `phrase` inside #message-<id> and create an anchored comment with `note`
 // through the plugin's REAL selection pipeline: build the Range the way a user
 // selection would, open the plugin's editor via its selection entry point, type, save.
-const commentOnPhrase = async (page: any, msgId: string, phrase: string, note: string) => {
-  const opened = await page.evaluate(
-    ({ msgId, phrase }: any) => {
-      const container = document.getElementById(`message-${msgId}`);
-      if (!container) return "no-container";
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-      let node: Node | null;
-      while ((node = walker.nextNode())) {
-        const idx = (node.textContent || "").indexOf(phrase);
-        if (idx >= 0) {
-          const range = document.createRange();
-          range.setStart(node, idx);
-          range.setEnd(node, idx + phrase.length);
-          const sel = window.getSelection()!;
-          sel.removeAllRanges();
-          sel.addRange(range);
-          // real trigger: the contextmenu event over the selection is what shows the menu
-          const rect = range.getBoundingClientRect();
-          const ev = new MouseEvent("contextmenu", {
-            bubbles: true, cancelable: true,
-            clientX: rect.left + 2, clientY: rect.top + 2,
-          });
-          (node.parentElement as HTMLElement).dispatchEvent(ev);
-          return "ok";
+const commentOnPhrase = async (
+  page: any,
+  msgId: string,
+  phrase: string,
+  note: string,
+) => {
+  // A0 rebuilds chat history from the server's raw log asynchronously (poll/WS
+  // push — our own comment save triggers it), so an injected message can vanish
+  // at ANY instant, including between a heal-check and the selection below.
+  // Retry until the selection lands; re-inject on each attempt. Only the race
+  // outcome ("no-container") is retried — "phrase-not-found" fails fast, it
+  // would be a real defect, not a race.
+  let opened = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await ensureInjected(page);
+    opened = await page.evaluate(
+      ({ msgId, phrase }: any) => {
+        const container = document.getElementById(`message-${msgId}`);
+        if (!container) return "no-container";
+        const walker = document.createTreeWalker(
+          container,
+          NodeFilter.SHOW_TEXT,
+        );
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const idx = (node.textContent || "").indexOf(phrase);
+          if (idx >= 0) {
+            const range = document.createRange();
+            range.setStart(node, idx);
+            range.setEnd(node, idx + phrase.length);
+            const sel = window.getSelection()!;
+            sel.removeAllRanges();
+            sel.addRange(range);
+            // real trigger: the contextmenu event over the selection is what shows the menu
+            const rect = range.getBoundingClientRect();
+            const ev = new MouseEvent("contextmenu", {
+              bubbles: true,
+              cancelable: true,
+              clientX: rect.left + 2,
+              clientY: rect.top + 2,
+            });
+            (node.parentElement as HTMLElement).dispatchEvent(ev);
+            return "ok";
+          }
         }
-      }
-      return "phrase-not-found";
-    },
-    { msgId, phrase },
-  );
+        return "phrase-not-found";
+      },
+      { msgId, phrase },
+    );
+    if (opened !== "no-container") break;
+    await page.waitForTimeout(400);
+  }
   expect(opened).toBe("ok");
   // the plugin menu must be visible — then click its real "Comment" item
   await page.waitForSelector(".cc-menu", { timeout: 5000 });
-  await page.locator('.cc-menu .cc-menu-item', { hasText: "Comment" }).first().click();
+  await page
+    .locator(".cc-menu .cc-menu-item", { hasText: "Comment" })
+    .first()
+    .click();
   await page.waitForSelector(".cc-editor-input", { timeout: 5000 });
   await page.locator(".cc-editor-input").fill(note);
   // The plugin's own save is fire-and-forget (`void this.persist()` in the
@@ -112,9 +205,12 @@ const commentOnPhrase = async (page: any, msgId: string, phrase: string, note: s
 const reloadIntoChat = async (page: any, id: string) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
+  await dismissNotificationToasts(page);
   await page.evaluate((c: string) => (globalThis as any).setContext(c), id);
   await waitStore(page);
-  await page.evaluate(() => (window as any).Alpine.store("chatComments").bootstrap());
+  await page.evaluate(() =>
+    (window as any).Alpine.store("chatComments").bootstrap(),
+  );
 };
 
 // Open the comments modal through the real toolbar control and wait for the
@@ -124,12 +220,15 @@ const openCommentsModal = async (page: any) => {
   // isVisible() resolves false for a not-yet-rendered element (it does not
   // throw), so this stays idempotent without swallowing a real failure.
   if (await input.isVisible()) return;
+  await dismissNotificationToasts(page); // belt-and-braces: toast over the toolbar
   await page.locator(".cc-toolbar-btn").click();
   await input.waitFor({ state: "visible", timeout: 15000 });
 };
 
 const closeCommentsModal = async (page: any) => {
-  await page.evaluate(() => (window as any).Alpine.store("chatComments").closeCommentsModal());
+  await page.evaluate(() =>
+    (window as any).Alpine.store("chatComments").closeCommentsModal(),
+  );
 };
 
 // What the user can actually see: rows rendered in the comments modal.
@@ -140,23 +239,31 @@ const visibleCommentCount = async (page: any) => {
 
 // ── Givens ───────────────────────────────────────────────────────────────────
 
-Given("I am in a chat", async ({ loggedInPage }: any) => { await openChat(loggedInPage); });
+Given("I am in a chat", async ({ loggedInPage }: any) => {
+  await openChat(loggedInPage);
+});
 
 Given("the chat contains a message from me", async ({ loggedInPage }: any) => {
   await renderMessage(loggedInPage, "e2e-user-1", "user", MSG_TEXT);
 });
 
-Given("the chat contains a message from me and a reply from the agent", async ({ loggedInPage }: any) => {
-  await renderMessage(loggedInPage, "e2e-user-1", "user", MSG_TEXT);
-  // A0 taxonomy: the agent's visible reply is type "response" (renders a
-  // message-<id> container). type "agent" is internal reasoning and renders
-  // into process-group-<id>, which is not a commentable message surface.
-  await renderMessage(loggedInPage, "e2e-agent-1", "response", AGENT_TEXT);
-});
+Given(
+  "the chat contains a message from me and a reply from the agent",
+  async ({ loggedInPage }: any) => {
+    await renderMessage(loggedInPage, "e2e-user-1", "user", MSG_TEXT);
+    // A0 taxonomy: the agent's visible reply is type "response" (renders a
+    // message-<id> container). type "agent" is internal reasoning and renders
+    // into process-group-<id>, which is not a commentable message surface.
+    await renderMessage(loggedInPage, "e2e-agent-1", "response", AGENT_TEXT);
+  },
+);
 
-Given("I have commented on a phrase inside that message", async ({ loggedInPage }: any) => {
-  await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", NOTE);
-});
+Given(
+  "I have commented on a phrase inside that message",
+  async ({ loggedInPage }: any) => {
+    await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", NOTE);
+  },
+);
 
 // ── Whens ────────────────────────────────────────────────────────────────────
 
@@ -172,25 +279,58 @@ When("I add a comment to the chat", async ({ loggedInPage }: any) => {
   await expect(loggedInPage.locator(".cc-modal-item")).toHaveCount(before + 1);
 });
 
-When("I comment on a phrase inside that message", async ({ loggedInPage }: any) => {
-  await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", NOTE);
-});
+When(
+  "I comment on a phrase inside that message",
+  async ({ loggedInPage }: any) => {
+    await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", NOTE);
+  },
+);
 
-When("I comment on two different phrases inside that message", async ({ loggedInPage }: any) => {
-  await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", "first note");
-  await commentOnPhrase(loggedInPage, "e2e-user-1", "lazy dog", "second note");
-});
+When(
+  "I comment on two different phrases inside that message",
+  async ({ loggedInPage }: any) => {
+    await commentOnPhrase(
+      loggedInPage,
+      "e2e-user-1",
+      "quick brown fox",
+      "first note",
+    );
+    await commentOnPhrase(
+      loggedInPage,
+      "e2e-user-1",
+      "lazy dog",
+      "second note",
+    );
+  },
+);
 
 When("I comment on a phrase in each of them", async ({ loggedInPage }: any) => {
-  await commentOnPhrase(loggedInPage, "e2e-user-1", "quick brown fox", "on my message");
-  await commentOnPhrase(loggedInPage, "e2e-agent-1", "answer you requested", "on the agent reply");
+  await commentOnPhrase(
+    loggedInPage,
+    "e2e-user-1",
+    "quick brown fox",
+    "on my message",
+  );
+  await commentOnPhrase(
+    loggedInPage,
+    "e2e-agent-1",
+    "answer you requested",
+    "on the agent reply",
+  );
 });
 
 When("I change the comment's note", async ({ loggedInPage }: any) => {
   // real path: click the highlight → popover → Edit → editor prefilled → save
+  // (healed poll: the highlight lives in the message DOM, which A0's async
+  // history rebuild can wipe — re-inject until one is actually clickable)
+  await expectHealed(loggedInPage, async (p: any) => {
+    expect(await p.locator(".cc-highlight").count()).toBeGreaterThan(0);
+  });
   await loggedInPage.locator(".cc-highlight").first().click();
   await loggedInPage.waitForSelector(".cc-popover", { timeout: 5000 });
-  await loggedInPage.locator(".cc-popover .cc-btn", { hasText: "Edit" }).click();
+  await loggedInPage
+    .locator(".cc-popover .cc-btn", { hasText: "Edit" })
+    .click();
   await loggedInPage.waitForSelector(".cc-editor-input", { timeout: 5000 });
   await loggedInPage.locator(".cc-editor-input").fill(EDITED);
   // Same reasoning as commentOnPhrase: editComment() calls `void this.persist()`,
@@ -227,7 +367,11 @@ When("I switch to a different chat", async ({ loggedInPage }: any) => {
   // real chat switch repaint would
   await loggedInPage.evaluate(() => {
     const h = document.getElementById("chat-history");
-    if (h) { const d = document.createElement("div"); h.appendChild(d); d.remove(); }
+    if (h) {
+      const d = document.createElement("div");
+      h.appendChild(d);
+      d.remove();
+    }
   });
   await loggedInPage.waitForFunction(
     (c: string) => (window as any).Alpine.store("chatComments").contextId === c,
@@ -237,10 +381,17 @@ When("I switch to a different chat", async ({ loggedInPage }: any) => {
 });
 
 When("I switch back to the first chat", async ({ loggedInPage }: any) => {
-  await loggedInPage.evaluate((c: string) => (globalThis as any).setContext(c), ctx);
+  await loggedInPage.evaluate(
+    (c: string) => (globalThis as any).setContext(c),
+    ctx,
+  );
   await loggedInPage.evaluate(() => {
     const h = document.getElementById("chat-history");
-    if (h) { const d = document.createElement("div"); h.appendChild(d); d.remove(); }
+    if (h) {
+      const d = document.createElement("div");
+      h.appendChild(d);
+      d.remove();
+    }
   });
   await loggedInPage.waitForFunction(
     (c: string) => (window as any).Alpine.store("chatComments").contextId === c,
@@ -260,7 +411,9 @@ When("I try to add an empty comment", async ({ loggedInPage }: any) => {
 });
 
 When("I send the comments to the prompt box", async ({ loggedInPage }: any) => {
-  await loggedInPage.evaluate(() => (window as any).Alpine.store("chatComments").sendAllToPrompt());
+  await loggedInPage.evaluate(() =>
+    (window as any).Alpine.store("chatComments").sendAllToPrompt(),
+  );
 });
 
 // API negative pokes — raw fetchApi so status codes are observable
@@ -277,30 +430,55 @@ const poke = async (page: any, body: any) =>
 
 let lastPoke: { status: number; text: string } = { status: 0, text: "" };
 
-When("the comments service is asked without saying which chat", async ({ loggedInPage }: any) => {
-  lastPoke = await poke(loggedInPage, { action: "load" });
-});
+When(
+  "the comments service is asked without saying which chat",
+  async ({ loggedInPage }: any) => {
+    lastPoke = await poke(loggedInPage, { action: "load" });
+  },
+);
 
-When("the comments service is asked about a chat that does not exist", async ({ loggedInPage }: any) => {
-  lastPoke = await poke(loggedInPage, { action: "load", context: "does-not-exist-e2e" });
-});
+When(
+  "the comments service is asked about a chat that does not exist",
+  async ({ loggedInPage }: any) => {
+    lastPoke = await poke(loggedInPage, {
+      action: "load",
+      context: "does-not-exist-e2e",
+    });
+  },
+);
 
-When("the comments service is given comments that are not a list", async ({ loggedInPage }: any) => {
-  lastPoke = await poke(loggedInPage, { action: "save", context: ctx, comments: "nope" });
-});
+When(
+  "the comments service is given comments that are not a list",
+  async ({ loggedInPage }: any) => {
+    lastPoke = await poke(loggedInPage, {
+      action: "save",
+      context: ctx,
+      comments: "nope",
+    });
+  },
+);
 
 // ── Thens ────────────────────────────────────────────────────────────────────
 
-Then("a comments control is available in the chat toolbar", async ({ loggedInPage }: any) => {
-  await expect(loggedInPage.locator(".cc-toolbar-btn")).toBeVisible({ timeout: 12000 });
-});
+Then(
+  "a comments control is available in the chat toolbar",
+  async ({ loggedInPage }: any) => {
+    await expect(loggedInPage.locator(".cc-toolbar-btn")).toBeVisible({
+      timeout: 12000,
+    });
+  },
+);
 
 Then("the chat shows it has one comment", async ({ loggedInPage }: any) => {
-  await expect(loggedInPage.locator(".cc-badge")).toHaveText("1", { timeout: 8000 });
+  await expect(loggedInPage.locator(".cc-badge")).toHaveText("1", {
+    timeout: 8000,
+  });
 });
 
 Then("the chat shows it has two comments", async ({ loggedInPage }: any) => {
-  await expect(loggedInPage.locator(".cc-badge")).toHaveText("2", { timeout: 8000 });
+  await expect(loggedInPage.locator(".cc-badge")).toHaveText("2", {
+    timeout: 8000,
+  });
 });
 
 Then("the chat shows it has no comments", async ({ loggedInPage }: any) => {
@@ -314,71 +492,117 @@ Then("the chat shows it has no comments", async ({ loggedInPage }: any) => {
 
 Then("that chat shows no comments", async ({ loggedInPage }: any) => {
   // the freshly-switched-to chat carries none of the first chat's comments
-  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({ timeout: 10000 });
+  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({
+    timeout: 10000,
+  });
   await openCommentsModal(loggedInPage);
   await expect(loggedInPage.locator(".cc-modal-item")).toHaveCount(0);
   await closeCommentsModal(loggedInPage);
 });
 
-Then("the comment is still there after a reload", async ({ loggedInPage }: any) => {
-  await loggedInPage.waitForTimeout(1200);
-  await reloadIntoChat(loggedInPage, ctx);
-  await expect(loggedInPage.locator(".cc-badge")).toHaveText("1", { timeout: 10000 });
-});
+Then(
+  "the comment is still there after a reload",
+  async ({ loggedInPage }: any) => {
+    await loggedInPage.waitForTimeout(1200);
+    await reloadIntoChat(loggedInPage, ctx);
+    await expect(loggedInPage.locator(".cc-badge")).toHaveText("1", {
+      timeout: 10000,
+    });
+  },
+);
 
 Then("the comment is gone after a reload", async ({ loggedInPage }: any) => {
   await reloadIntoChat(loggedInPage, ctx);
-  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({ timeout: 10000 });
+  await expect(loggedInPage.locator(".cc-badge")).toBeHidden({
+    timeout: 10000,
+  });
   expect(await visibleCommentCount(loggedInPage)).toBe(0);
   await closeCommentsModal(loggedInPage);
 });
 
-Then("the phrase is highlighted in the message", async ({ loggedInPage }: any) => {
-  const mark = loggedInPage.locator("#message-e2e-user-1 mark.cc-highlight");
-  await expect(mark).toHaveCount(1, { timeout: 8000 });
-  await expect(mark).toHaveText("quick brown fox");
-});
+Then(
+  "the phrase is highlighted in the message",
+  async ({ loggedInPage }: any) => {
+    await expectHealed(loggedInPage, async (p: any) => {
+      const mark = p.locator("#message-e2e-user-1 mark.cc-highlight");
+      expect(await mark.count()).toBe(1);
+      expect(await mark.first().textContent()).toBe("quick brown fox");
+    });
+  },
+);
 
-Then("both phrases are highlighted in the message", async ({ loggedInPage }: any) => {
-  await expect(loggedInPage.locator("#message-e2e-user-1 mark.cc-highlight")).toHaveCount(2, { timeout: 8000 });
-});
+Then(
+  "both phrases are highlighted in the message",
+  async ({ loggedInPage }: any) => {
+    await expectHealed(loggedInPage, async (p: any) => {
+      expect(
+        await p.locator("#message-e2e-user-1 mark.cc-highlight").count(),
+      ).toBe(2);
+    });
+  },
+);
 
-Then("each commented phrase is highlighted in its own message", async ({ loggedInPage }: any) => {
-  await expect(loggedInPage.locator("#message-e2e-user-1 mark.cc-highlight")).toHaveCount(1, { timeout: 8000 });
-  await expect(loggedInPage.locator("#message-e2e-agent-1 mark.cc-highlight")).toHaveCount(1, { timeout: 8000 });
-});
+Then(
+  "each commented phrase is highlighted in its own message",
+  async ({ loggedInPage }: any) => {
+    await expectHealed(loggedInPage, async (p: any) => {
+      expect(
+        await p.locator("#message-e2e-user-1 mark.cc-highlight").count(),
+      ).toBe(1);
+      expect(
+        await p.locator("#message-e2e-agent-1 mark.cc-highlight").count(),
+      ).toBe(1);
+    });
+  },
+);
 
-Then("the comment records which text it refers to", async ({ loggedInPage }: any) => {
-  const rec = await loggedInPage.evaluate(
-    () => (window as any).Alpine.store("chatComments").comments[0],
-  );
-  expect(rec.quoted_text).toBe("quick brown fox");
-  expect(rec.message_id).toBe("e2e-user-1");
-});
+Then(
+  "the comment records which text it refers to",
+  async ({ loggedInPage }: any) => {
+    const rec = await loggedInPage.evaluate(
+      () => (window as any).Alpine.store("chatComments").comments[0],
+    );
+    expect(rec.quoted_text).toBe("quick brown fox");
+    expect(rec.message_id).toBe("e2e-user-1");
+  },
+);
 
-Then("the comment list attributes the comment to the quoted text", async ({ loggedInPage }: any) => {
-  await loggedInPage.locator(".cc-toolbar-btn").click();
-  const quote = loggedInPage.locator(".cc-modal-item .cc-modal-quote");
-  await expect(quote).toHaveCount(1, { timeout: 8000 });
-  await expect(quote).toContainText("quick brown fox");
-  await loggedInPage.evaluate(() => (window as any).Alpine.store("chatComments").closeCommentsModal());
-});
+Then(
+  "the comment list attributes the comment to the quoted text",
+  async ({ loggedInPage }: any) => {
+    await loggedInPage.locator(".cc-toolbar-btn").click();
+    const quote = loggedInPage.locator(".cc-modal-item .cc-modal-quote");
+    await expect(quote).toHaveCount(1, { timeout: 8000 });
+    await expect(quote).toContainText("quick brown fox");
+    await loggedInPage.evaluate(() =>
+      (window as any).Alpine.store("chatComments").closeCommentsModal(),
+    );
+  },
+);
 
-Then("the stored comment carries a creation timestamp", async ({ loggedInPage }: any) => {
-  // end state: created_at persisted as a plausible unix-seconds integer
-  await loggedInPage.waitForTimeout(800);
-  const rec = await loggedInPage.evaluate(async (c: string) => {
-    const { callJsonApi } = await import("/js/api.js");
-    const r = await callJsonApi("/plugins/chat_comments/comments", { action: "load", context: c });
-    return r.comments[0];
-  }, ctx);
-  expect(Number.isInteger(rec.created_at)).toBe(true);
-  expect(rec.created_at).toBeGreaterThan(1600000000);
-});
+Then(
+  "the stored comment carries a creation timestamp",
+  async ({ loggedInPage }: any) => {
+    // end state: created_at persisted as a plausible unix-seconds integer
+    await loggedInPage.waitForTimeout(800);
+    const rec = await loggedInPage.evaluate(async (c: string) => {
+      const { callJsonApi } = await import("/js/api.js");
+      const r = await callJsonApi("/plugins/chat_comments/comments", {
+        action: "load",
+        context: c,
+      });
+      return r.comments[0];
+    }, ctx);
+    expect(Number.isInteger(rec.created_at)).toBe(true);
+    expect(rec.created_at).toBeGreaterThan(1600000000);
+  },
+);
 
 Then("the comment shows the updated note", async ({ loggedInPage }: any) => {
   await loggedInPage.locator(".cc-highlight").first().click();
-  await expect(loggedInPage.locator(".cc-popover-text")).toHaveText(EDITED, { timeout: 5000 });
+  await expect(loggedInPage.locator(".cc-popover-text")).toHaveText(EDITED, {
+    timeout: 5000,
+  });
   await loggedInPage.locator("body").click({ position: { x: 4, y: 4 } });
 });
 
@@ -387,7 +611,10 @@ Then("the updated note survives a reload", async ({ loggedInPage }: any) => {
   await reloadIntoChat(loggedInPage, ctx);
   const rec = await loggedInPage.evaluate(async (c: string) => {
     const { callJsonApi } = await import("/js/api.js");
-    const r = await callJsonApi("/plugins/chat_comments/comments", { action: "load", context: c });
+    const r = await callJsonApi("/plugins/chat_comments/comments", {
+      action: "load",
+      context: c,
+    });
     return r.comments[0];
   }, ctx);
   expect(rec.comment).toBe(EDITED);
@@ -403,7 +630,9 @@ Then("it reports the chat as not found", async () => {
 
 Then("the prompt box contains my comment", async ({ loggedInPage }: any) => {
   const val = await loggedInPage.evaluate(
-    () => (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "",
+    () =>
+      (document.getElementById("chat-input") as HTMLTextAreaElement)?.value ||
+      "",
   );
   expect(val).toContain(NOTE);
 });
