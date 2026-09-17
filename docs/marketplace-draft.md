@@ -33,7 +33,7 @@ screenshots:
 
 ## Thumbnail
 
-`usr/plugins/chat_comments/webui/thumbnail.png` — square 512×512, 2,751 bytes (< 20 KB). Ships inside
+`webui/thumbnail.png` — square 512×512, 2,751 bytes (< 20 KB). Ships inside
 the plugin; copy to `plugins/chat_comments/thumbnail.png` in the index submission if a card image is
 wanted there too.
 
@@ -46,7 +46,7 @@ plugin installed, because honest marketplace screenshots must be real UI, not mo
 1. `docs/screenshot-comment.png` — a chat message with a highlighted phrase and the view popover
    (note + Edit/Delete) open, plus the toolbar badge showing a count.
 2. `docs/screenshot-modal.png` — the comments manager modal listing one anchored comment (with its
-   quoted text) and one **General** comment, with the *Send to prompt* footer.
+   quoted text) and one **General** comment, with the _Send to prompt_ footer.
 
 Capture recipe (once a live A0 is reachable with credentials): log in → new chat → send a message →
 select text → **Comment** → screenshot; open the comments button → screenshot the modal. The e2e BDD

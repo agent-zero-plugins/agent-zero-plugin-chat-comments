@@ -4,7 +4,7 @@ Thanks for helping improve the Chat Comments plugin for Agent Zero.
 
 ## Repo layout
 
-- `usr/plugins/chat_comments/` — the plugin itself (API handler, webui store/modal, extension mount).
+- Repo root — the plugin itself (root layout, `.devkit.yml` `plugin_dir: .`): API handler, webui store/modal, extension mount.
 - `docs/spec/` — the four living BDD docs (`behaviour-spec.md`, `implementation-plan.md`, `e2e.feature.md`, `e2e-steps-spec.md`). Behaviour changes MUST update these.
 - `tests/` — L1 testkit shape suite (`pytest`) + L3 Playwright BDD (`tests/e2e/`).
 - `tests/_testkit/` — the plugin devkit (git submodule). Never edit here; contribute upstream.
